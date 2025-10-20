@@ -1,63 +1,55 @@
+#!/usr/bin/env python3
 import csv
+import ast
 
-def append_gold_hosts(ntnx_file, merged_file):
-    # Detecta delimitador automaticamente para o ntnxCap.csv
-    with open(ntnx_file, 'r', encoding='utf-8', newline='') as f:
-        sample = f.read(2048)
-        f.seek(0)
-        dialect_ntnx = csv.Sniffer().sniff(sample, delimiters=";,")
-        reader_ntnx = csv.DictReader(f, dialect_ntnx)
-        gold_hosts = [
-            row for row in reader_ntnx
-            if "gold" in row.get("MachineName", "").lower()
-        ]
+csv_file = "ntnxCap.csv"
 
-    if not gold_hosts:
-        print("[-] Nenhum host contendo 'GOLD' encontrado.")
-        return
-
-    print(f"[+] Encontrados {len(gold_hosts)} hosts contendo 'GOLD'.")
-
-    # Detecta delimitador automaticamente no merged existente
+def parse_ips_field(s):
+    if not s:
+        return ""
+    s = s.strip()
+    if s in ("", "[]"):
+        return ""
     try:
-        with open(merged_file, 'r', encoding='utf-8', newline='') as f:
-            sample = f.read(2048)
-            f.seek(0)
-            dialect_merged = csv.Sniffer().sniff(sample, delimiters=";,")
-            reader_merged = list(csv.DictReader(f, dialect_merged))
-            existing_fields = [c.strip() for c in reader_merged[0].keys()] if reader_merged else []
-    except FileNotFoundError:
-        existing_fields = []
+        val = ast.literal_eval(s)
+        if isinstance(val, (list, tuple)):
+            return ", ".join(ip.replace(",", ".").strip() for ip in val)
+    except Exception:
+        pass
+    s2 = s.replace("[", "").replace("]", "").replace("'", "").replace('"', "")
+    parts = [p.strip().replace(",", ".") for p in s2.split() if p.strip()]
+    return ", ".join(parts)
 
-    # Função pra encontrar colunas com nomes semelhantes
-    def find_col(possible_names):
-        for name in existing_fields:
-            for possible in possible_names:
-                if name.lower().replace(" ", "") == possible.lower().replace(" ", ""):
-                    return name
-        return None
+with open(csv_file, encoding="utf-8") as f:
+    # detectar delimitador ( ; ou , )
+    sample = f.read(2048)
+    f.seek(0)
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters=";,")
+    except Exception:
+        dialect = csv.get_dialect("excel")
+        dialect.delimiter = ";"
 
-    # Mapeia as colunas reais (ou define padrão)
-    col_host = find_col(["Host name", "Hostname", "Host"]) or "Host name"
-    col_ip = find_col(["Host IP", "IP", "Address"]) or "Host IP"
-    col_env = find_col(["Environment", "Env", "Ambiente"]) or "Environment"
+    reader = csv.DictReader(f, dialect=dialect)
 
-    # Garante que os headers existem
-    if not existing_fields:
-        existing_fields = [col_host, col_ip, col_env]
+    # encontrar nomes corretos de colunas
+    fnames = {name.lower(): name for name in reader.fieldnames}
+    col_machine = fnames.get("machinename")
+    col_ips = fnames.get("ips")
+    col_env = fnames.get("env") or fnames.get("environment")
 
-    # Abre merged para append
-    with open(merged_file, 'a', encoding='utf-8', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=existing_fields, delimiter=';')
-        # Escreve cabeçalho se o arquivo estava vazio
-        if f.tell() == 0:
-            writer.writeheader()
+    if not col_machine:
+        print("❌ Coluna 'MachineName' não encontrada.")
+        exit(1)
 
-        for row in gold_hosts:
-            writer.writerow({
-                col_host: row.get("MachineName", "").strip(),
-                col_ip: row.get("IPs", "").strip(),
-                col_env: row.get("env", "").strip()
-            })
+    found = False
+    for row in reader:
+        name = (row.get(col_machine) or "").strip()
+        if "gold" in name.lower():
+            ips = parse_ips_field(row.get(col_ips, ""))
+            env = (row.get(col_env, "") or "").strip()
+            print(f"{name} | {ips} | {env}")
+            found = True
 
-    print(f"[+] {len(gold_hosts)} linhas adicionadas à planilha '{merged_file}'.")
+    if not found:
+        print("⚠️ Nenhum MachineName contendo 'GOLD' encontrado.")
