@@ -19,14 +19,17 @@ def append_gold_hosts(ntnx_file, merged_file):
     print(f"[+] Encontrados {len(gold_hosts)} hosts contendo 'GOLD'.")
 
     # Detecta delimitador automaticamente no merged existente
-    with open(merged_file, 'r', encoding='utf-8', newline='') as f:
-        sample = f.read(2048)
-        f.seek(0)
-        dialect_merged = csv.Sniffer().sniff(sample, delimiters=";,")
-        reader_merged = list(csv.DictReader(f, dialect_merged))
-        existing_fields = [c.strip() for c in reader_merged[0].keys()] if reader_merged else []
+    try:
+        with open(merged_file, 'r', encoding='utf-8', newline='') as f:
+            sample = f.read(2048)
+            f.seek(0)
+            dialect_merged = csv.Sniffer().sniff(sample, delimiters=";,")
+            reader_merged = list(csv.DictReader(f, dialect_merged))
+            existing_fields = [c.strip() for c in reader_merged[0].keys()] if reader_merged else []
+    except FileNotFoundError:
+        existing_fields = []
 
-    # Cria correspondência flexível de nomes de coluna
+    # Função pra encontrar colunas com nomes semelhantes
     def find_col(possible_names):
         for name in existing_fields:
             for possible in possible_names:
@@ -34,18 +37,19 @@ def append_gold_hosts(ntnx_file, merged_file):
                     return name
         return None
 
-    col_host = find_col(["Host name", "Hostname", "Host"])
-    col_ip = find_col(["Host IP", "IP", "Address"])
-    col_env = find_col(["Environment", "Env", "Ambiente"])
+    # Mapeia as colunas reais (ou define padrão)
+    col_host = find_col(["Host name", "Hostname", "Host"]) or "Host name"
+    col_ip = find_col(["Host IP", "IP", "Address"]) or "Host IP"
+    col_env = find_col(["Environment", "Env", "Ambiente"]) or "Environment"
 
-    # Se o arquivo estiver vazio, define os padrões
+    # Garante que os headers existem
     if not existing_fields:
-        existing_fields = ["Host name", "Host IP", "Environment"]
-        col_host, col_ip, col_env = existing_fields
+        existing_fields = [col_host, col_ip, col_env]
 
-    # Abre merged para append com o mesmo delimitador
+    # Abre merged para append
     with open(merged_file, 'a', encoding='utf-8', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=existing_fields, delimiter=';')
+        # Escreve cabeçalho se o arquivo estava vazio
         if f.tell() == 0:
             writer.writeheader()
 
@@ -57,7 +61,3 @@ def append_gold_hosts(ntnx_file, merged_file):
             })
 
     print(f"[+] {len(gold_hosts)} linhas adicionadas à planilha '{merged_file}'.")
-
-
-# === Uso ===
-append_gold_hosts("ntnxCap.csv", "merged_data_departamentos.csv")
